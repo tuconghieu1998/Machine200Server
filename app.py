@@ -1,7 +1,37 @@
 from flask import Flask, request, jsonify
 import json
+from dotenv import load_dotenv
+import os
+import pyodbc
+from datetime import datetime
+
+load_dotenv()
 
 app = Flask(__name__)
+
+app.config['SERVER'] = os.getenv('SERVER')
+app.config['DATABASE'] = os.getenv('DATABASE')
+app.config['DB_USERNAME'] = os.getenv('DB_USERNAME')
+app.config['DB_PASSWORD'] = os.getenv('DB_PASSWORD')
+
+# Cấu hình kết nối đến SQL Server
+conn_str = f"DRIVER={{SQL Server}};SERVER={app.config['SERVER']};DATABASE={app.config['DATABASE']};UID={app.config['DB_USERNAME']};PWD={app.config['DB_PASSWORD']}"
+
+table_name = "ws2_working_status"
+
+def save_to_db(table, sensor_id, machine_id, line, status, timestamp):
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+        
+        cursor.execute(f"INSERT INTO {table} (sensor_id, machine_id, line, status, timestamp) VALUES (?, ?, ?, ?, ?)",
+                       (sensor_id, machine_id, line, status, timestamp))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print("Lỗi kết nối SQL Server:", e)
+        return False
 
 def initMachineData():
     # Initialize 200 machines
@@ -22,7 +52,33 @@ def initMachineData():
     }
     return machine_states
 
-machine_states = initMachineData()
+def getCurrentTime():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def loadMachineConfig():
+    conn = pyodbc.connect(conn_str)
+    cursor = conn.cursor()
+    cursor.execute("SELECT sensor_id, machine_id, line, note FROM ws2_machine_config")
+    rows = cursor.fetchall()
+
+    # Tạo thời gian hiện tại
+    current = getCurrentTime()
+
+    # Duyệt qua các dòng để tạo machine_states dict
+    data = {
+        row.sensor_id: {
+            "sensor_id": row.sensor_id,
+            "machine_id": row.machine_id,
+            "line": row.line,
+            "status": "stopped",
+            "update_time": current
+        }
+        for i, row in enumerate(rows)
+    }
+    return data
+
+machine_states = loadMachineConfig()
+print(machine_states)
 # Make it accessible to machine_status
 
 @app.route('/')
@@ -37,15 +93,20 @@ def machine_data():
 def receive_sensor_data():
     try:
         payload = request.get_json()
-        machine_id = payload["id"]
-        print(f"📨 Received from ESP32: {payload} DELL {machine_id}")
-        if machine_id in machine_states.keys():
-            machine_states[machine_id] = {
-                "status": payload.get("status", "running"),
-                "temperature": payload.get("temperature"),
-                "vibration": payload.get("vibration"),
-                "uptime": payload.get("uptime")
-            }
+        sensor_id = payload["sensor_id"]
+        print(f"📨 Received from ESP32: {payload} DELL {sensor_id}")
+        if sensor_id in machine_states.keys():
+            prev_status = machine_states[sensor_id]['status']
+            current_status = payload.get("status", "stopped")
+            prev_update_time = machine_states[sensor_id]['update_time']
+            current_time = getCurrentTime()
+            # update data
+            machine_states[sensor_id]['status'] = current_status
+            machine_states[sensor_id]['update_time'] = current_time
+
+            # check save database
+            save_to_db(table_name, sensor_id, machine_states[sensor_id]['machine_id'], machine_states[sensor_id]['line'], current_status, current_time)
+
             return jsonify({"status": "ok", "message": "Data received"}), 200 
         else:
             return jsonify({"status": "error", "message": "Machine not found!"}), 404   
