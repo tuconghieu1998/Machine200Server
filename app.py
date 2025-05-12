@@ -33,25 +33,6 @@ def save_to_db(table, sensor_id, machine_id, line, status, timestamp):
         print("Lỗi kết nối SQL Server:", e)
         return False
 
-def initMachineData():
-    # Initialize 200 machines
-    number_of_machines = 200
-    lines = 4
-    statuses = ['running', 'stopped', 'changeover']
-
-    machine_states = {
-        str(i + 1): {
-            "id": i + 1,
-            "status": statuses[0],
-            "line": (i // (number_of_machines // lines)) + 1,
-            "temperature": f"{round(20 + i % 10 + (i * 0.1), 1)}°C",
-            "vibration": f"{(i * 0.01 % 3):.2f} mm/s",
-            "uptime": f"{(i * 5) % 1000} hrs"
-        }
-        for i in range(number_of_machines)
-    }
-    return machine_states
-
 def getCurrentTime():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
