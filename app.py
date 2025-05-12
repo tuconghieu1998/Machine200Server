@@ -75,7 +75,7 @@ def receive_sensor_data():
     try:
         payload = request.get_json()
         sensor_id = payload["sensor_id"]
-        print(f"📨 Received from ESP32: {payload} DELL {sensor_id}")
+        print(f"Received from ESP32: {payload} DELL {sensor_id}")
         if sensor_id in machine_states.keys():
             prev_status = machine_states[sensor_id]['status']
             current_status = payload.get("status", "stopped")
