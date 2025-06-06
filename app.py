@@ -106,15 +106,16 @@ def receive_sensor_data():
 
 def check_ping_status():
     while True:
-        for sensor_id, ip in machine_states.items():
+        for sensor_id in machine_states.keys():
+            ip = machine_states[sensor_id]['ip']
             if ip != "" and machine_states[sensor_id]['connect'] == True: # only check ping when connect online
                 response = ping(ip, timeout=2)
                 if response is None:
+                    #print("ESP32 disconnect")
                     machine_states[sensor_id]['connect'] = False
                 else:
+                    #print("ESP32 connect")
                     machine_states[sensor_id]['connect'] = True
-            else:
-                machine_states[sensor_id]['connect'] = False
         time.sleep(10)
 
 if __name__ == "__main__":

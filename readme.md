@@ -1,3 +1,6 @@
+Open Cmd as Admin and Run
+netsh advfirewall set allprofiles state off
+
 install python
 
 pip install flask
@@ -28,3 +31,4 @@ Trigger: Select "When the computer starts".
 Action: Choose "Start a Program" → Browse → Select start_flask.bat.
 
 Click Finish.
+
