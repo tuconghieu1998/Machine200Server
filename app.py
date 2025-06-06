@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 import os
 import pyodbc
 from datetime import datetime
+from ping3 import ping
+import time
+import threading
 
 load_dotenv()
 
@@ -52,6 +55,8 @@ def loadMachineConfig():
             "machine_id": row.machine_id,
             "line": row.line,
             "status": "stopped",
+            "connect": False,
+            "ip": "",
             "update_time": current
         }
         for i, row in enumerate(rows)
@@ -75,7 +80,8 @@ def receive_sensor_data():
     try:
         payload = request.get_json()
         sensor_id = payload["sensor_id"]
-        print(f"Received from ESP32: {payload} DELL {sensor_id}")
+        sender_ip = request.remote_addr
+        print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip}")
         if sensor_id in machine_states.keys():
             prev_status = machine_states[sensor_id]['status']
             current_status = payload.get("status", "stopped")
@@ -84,6 +90,8 @@ def receive_sensor_data():
             # update data
             machine_states[sensor_id]['status'] = current_status
             machine_states[sensor_id]['update_time'] = current_time
+            machine_states[sensor_id]['ip'] = sender_ip
+            machine_states[sensor_id]['connect'] = True
 
             # check save database
             save_to_db(table_name, sensor_id, machine_states[sensor_id]['machine_id'], machine_states[sensor_id]['line'], current_status, current_time)
@@ -94,6 +102,21 @@ def receive_sensor_data():
     except Exception as e:
         print("Error:", e)
         return jsonify({"status": "error", "message": "Bad Request!"}), 400
+    
+
+def check_ping_status():
+    while True:
+        for sensor_id, ip in machine_states.items():
+            if ip != "" and machine_states[sensor_id]['connect'] == True: # only check ping when connect online
+                response = ping(ip, timeout=2)
+                if response is None:
+                    machine_states[sensor_id]['connect'] = False
+                else:
+                    machine_states[sensor_id]['connect'] = True
+            else:
+                machine_states[sensor_id]['connect'] = False
+        time.sleep(10)
 
 if __name__ == "__main__":
+    threading.Thread(target=check_ping_status, daemon=True).start()
     app.run(host="0.0.0.0", port=5001)
