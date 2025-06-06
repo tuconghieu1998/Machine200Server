@@ -81,12 +81,12 @@ def receive_sensor_data():
         payload = request.get_json()
         sensor_id = payload["sensor_id"]
         sender_ip = request.remote_addr
-        print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip}")
+        current_time = getCurrentTime()
+        print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip} at {current_time}")
         if sensor_id in machine_states.keys():
             prev_status = machine_states[sensor_id]['status']
             current_status = payload.get("status", "stopped")
             prev_update_time = machine_states[sensor_id]['update_time']
-            current_time = getCurrentTime()
             # update data
             machine_states[sensor_id]['status'] = current_status
             machine_states[sensor_id]['update_time'] = current_time
