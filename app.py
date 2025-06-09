@@ -54,10 +54,10 @@ def loadMachineConfig():
             "sensor_id": row.sensor_id,
             "machine_id": row.machine_id,
             "line": row.line,
-            "status": "stopped",
-            "connect": False,
+            "status": "disconnected",
             "ip": "",
-            "update_time": current
+            "update_time": current,
+            "saved_time": ""
         }
         for i, row in enumerate(rows)
     }
@@ -73,51 +73,64 @@ def home():
 
 @app.route('/machine_data')
 def machine_data():
-    return jsonify(machine_states)
-
-@app.route('/sensor', methods=['POST'])
-def receive_sensor_data():
-    try:
-        payload = request.get_json()
-        sensor_id = payload["sensor_id"]
-        sender_ip = request.remote_addr
+    try: 
         current_time = getCurrentTime()
-        print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip} at {current_time}")
-        if sensor_id in machine_states.keys():
-            prev_status = machine_states[sensor_id]['status']
-            current_status = payload.get("status", "stopped")
-            prev_update_time = machine_states[sensor_id]['update_time']
-            # update data
-            machine_states[sensor_id]['status'] = current_status
-            machine_states[sensor_id]['update_time'] = current_time
-            machine_states[sensor_id]['ip'] = sender_ip
-            machine_states[sensor_id]['connect'] = True
-
-            # check save database
-            save_to_db(table_name, sensor_id, machine_states[sensor_id]['machine_id'], machine_states[sensor_id]['line'], current_status, current_time)
-
-            return jsonify({"status": "ok", "message": "Data received"}), 200 
-        else:
-            return jsonify({"status": "error", "message": "Machine not found!"}), 404   
+        return jsonify({
+            "current_time": current_time,
+            "machine_states": machine_states
+        })
     except Exception as e:
         print("Error:", e)
         return jsonify({"status": "error", "message": "Bad Request!"}), 400
     
+@app.route('/sensor', methods=['POST'])
+def receive_sensor_data():
+    try:
+        payload = request.get_json(force=True)
+        sensor_id = payload.get("sensor_id")
+        current_status = payload.get("status", "stopped")
+        sender_ip = request.remote_addr
+        current_time = getCurrentTime()
 
-def check_ping_status():
-    while True:
-        for sensor_id in machine_states.keys():
-            ip = machine_states[sensor_id]['ip']
-            if ip != "" and machine_states[sensor_id]['connect'] == True: # only check ping when connect online
-                response = ping(ip, timeout=2)
-                if response is None:
-                    #print("ESP32 disconnect")
-                    machine_states[sensor_id]['connect'] = False
-                else:
-                    #print("ESP32 connect")
-                    machine_states[sensor_id]['connect'] = True
-        time.sleep(10)
+        print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip} at {current_time}")
+
+        if not sensor_id or sensor_id not in machine_states:
+            return jsonify({"status": "error", "message": "Invalid or unknown sensor_id"}), 400
+
+        # Truy xuất thông tin hiện tại của máy
+        machine = machine_states[sensor_id]
+        prev_status = machine['status']
+        now = datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')
+
+        # Cập nhật thông tin tạm thời
+        machine['status'] = current_status
+        machine['update_time'] = current_time
+        machine['ip'] = sender_ip
+
+        # Kiểm tra điều kiện để lưu DB
+        status_changed = (prev_status != current_status)
+        if machine['saved_time']:
+            last_saved = datetime.strptime(machine['saved_time'], '%Y-%m-%d %H:%M:%S')
+            minutes_elapsed = (now - last_saved).total_seconds() / 60
+        else:
+            minutes_elapsed = 9999  # ép buộc lưu nếu chưa từng lưu
+        if status_changed or minutes_elapsed >= 15:
+            machine['saved_time'] = current_time
+            save_to_db(
+                table_name,
+                sensor_id,
+                machine['machine_id'],
+                machine['line'],
+                current_status,
+                current_time
+            )
+            print(f"[{current_time}] Data saved for {sensor_id} (status: {current_status})")
+
+        return jsonify({"status": "ok", "message": "Data received"}), 200
+
+    except Exception as e:
+        print("Error receiving sensor data:", e)
+        return jsonify({"status": "error", "message": "Bad Request!"}), 400
 
 if __name__ == "__main__":
-    threading.Thread(target=check_ping_status, daemon=True).start()
     app.run(host="0.0.0.0", port=5001)
