@@ -154,7 +154,7 @@ def receive_sensor_data():
         sender_ip = request.remote_addr
         current_time = getCurrentTime()
 
-        print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip} at {current_time}")
+        #print(f"Received from ESP32: {payload}, ID: {sensor_id}, IP: {sender_ip} at {current_time}")
 
         if not sensor_id or sensor_id not in machine_states:
             return jsonify({"status": "error", "message": "Invalid or unknown sensor_id"}), 400
@@ -284,8 +284,8 @@ def check_disconnected():
 
                 second_elapsed = (now - last_update).total_seconds()
 
-                # Nếu hơn 60 giây chưa cập nhật
-                if second_elapsed > 60:
+                # Nếu hơn 5 phut chưa cập nhật
+                if second_elapsed > 300:
                     state["status"] = 'disconnected'
                     state["update_time"] = now_str
                     save_to_db(
