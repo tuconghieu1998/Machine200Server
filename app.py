@@ -1,9 +1,8 @@
 from flask import Flask, request, jsonify
-import json
 from dotenv import load_dotenv
-import os
-import pyodbc
 from datetime import datetime
+from sqlalchemy import create_engine, text
+import os
 import time
 import threading
 
@@ -16,20 +15,28 @@ app.config['DATABASE'] = os.getenv('DATABASE')
 app.config['DB_USERNAME'] = os.getenv('DB_USERNAME')
 app.config['DB_PASSWORD'] = os.getenv('DB_PASSWORD')
 
-# Cấu hình kết nối đến SQL Server
-conn_str = f"DRIVER={{SQL Server}};SERVER={app.config['SERVER']};DATABASE={app.config['DATABASE']};UID={app.config['DB_USERNAME']};PWD={app.config['DB_PASSWORD']}"
+# SQLAlchemy connection string
+conn_str = (
+    f"mssql+pyodbc://{app.config['DB_USERNAME']}:{app.config['DB_PASSWORD']}"
+    f"@{app.config['SERVER']}/{app.config['DATABASE']}?driver=ODBC+Driver+17+for+SQL+Server"
+)
 
+engine = create_engine(conn_str, pool_size=5, max_overflow=2, pool_timeout=30, pool_pre_ping=True)
 table_name = "ws2_working_status"
 
-def save_to_db(table, sensor_id, machine_id, line, status, timestamp):
+def save_to_db(sensor_id, machine_id, line, status, timestamp):
     try:
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-        
-        cursor.execute(f"INSERT INTO {table} (sensor_id, machine_id, line, status, timestamp) VALUES (?, ?, ?, ?, ?)",
-                       (sensor_id, machine_id, line, status, timestamp))
-        conn.commit()
-        conn.close()
+        with engine.begin() as conn:
+            conn.execute(text(f"""
+                INSERT INTO {table_name} (sensor_id, machine_id, line, status, timestamp)
+                VALUES (:sensor_id, :machine_id, :line, :status, :timestamp)
+            """), {
+                "sensor_id": sensor_id,
+                "machine_id": machine_id,
+                "line": line,
+                "status": status,
+                "timestamp": timestamp
+            })
         return True
     except Exception as e:
         print("Lỗi kết nối SQL Server:", e)
@@ -40,11 +47,9 @@ def getCurrentTime():
 
 def syncMachineConfig():
     try:
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-        cursor.execute("SELECT sensor_id, machine_id, line, note FROM ws2_machine_config")
-        rows = cursor.fetchall()
-        conn.close()
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT sensor_id, machine_id, line, note FROM ws2_machine_config"))
+            rows = result.fetchall()
 
         current = getCurrentTime()
 
@@ -82,28 +87,31 @@ def syncMachineConfig():
         return False
 
 def loadMachineConfig():
-    conn = pyodbc.connect(conn_str)
-    cursor = conn.cursor()
-    cursor.execute("SELECT sensor_id, machine_id, line, note FROM ws2_machine_config")
-    rows = cursor.fetchall()
+    try: 
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT sensor_id, machine_id, line, note FROM ws2_machine_config"))
+            rows = result.fetchall()
 
-    # Tạo thời gian hiện tại
-    current = getCurrentTime()
+        # Tạo thời gian hiện tại
+        current = getCurrentTime()
 
-    # Duyệt qua các dòng để tạo machine_states dict
-    data = {
-        row.sensor_id: {
-            "sensor_id": row.sensor_id,
-            "machine_id": row.machine_id,
-            "line": row.line,
-            "status": "disconnected",
-            "ip": "",
-            "update_time": current,
-            "saved_time": ""
+        # Duyệt qua các dòng để tạo machine_states dict
+        data = {
+            row.sensor_id: {
+                "sensor_id": row.sensor_id,
+                "machine_id": row.machine_id,
+                "line": row.line,
+                "status": "disconnected",
+                "ip": "",
+                "update_time": current,
+                "saved_time": ""
+            }
+            for i, row in enumerate(rows)
         }
-        for i, row in enumerate(rows)
-    }
-    return data
+        return data
+    except Exception as e:
+        print("Load config error:", e)
+        return {}
 
 machine_states = loadMachineConfig()
 print(machine_states)
@@ -179,7 +187,6 @@ def receive_sensor_data():
         if status_changed or minutes_elapsed >= 15:
             machine['saved_time'] = current_time
             save_to_db(
-                table_name,
                 sensor_id,
                 machine['machine_id'],
                 machine['line'],
@@ -203,20 +210,17 @@ def add_machine_config():
         line = payload["line"]
         note = payload.get("note", "")
 
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
+        with engine.begin() as conn:
+            result = conn.execute(text("SELECT COUNT(*) AS count FROM ws2_machine_config WHERE sensor_id = :sensor_id"), {"sensor_id": sensor_id})
+            if result.fetchone().count > 0:
+                return jsonify({"status": "error", "message": "Sensor ID already exists"}), 400
 
-        # Check if already exists
-        cursor.execute("SELECT COUNT(*) FROM ws2_machine_config WHERE sensor_id = ?", (sensor_id,))
-        if cursor.fetchone()[0] > 0:
-            return jsonify({"status": "error", "message": "Sensor ID already exists"}), 400
-
-        cursor.execute(
-            "INSERT INTO ws2_machine_config (sensor_id, machine_id, line, note) VALUES (?, ?, ?, ?)",
-            (sensor_id, machine_id, line, note)
-        )
-        conn.commit()
-        conn.close()
+            conn.execute(text("INSERT INTO ws2_machine_config (sensor_id, machine_id, line, note) VALUES (:sensor_id, :machine_id, :line, :note)"), {
+                "sensor_id": sensor_id,
+                "machine_id": machine_id,
+                "line": line,
+                "note": note
+            })
 
         return jsonify({"status": "ok", "message": "Machine added"}), 201
 
@@ -232,34 +236,34 @@ def update_machine_config(sensor_id):
         line = payload["line"]
         note = payload.get("note", "")
 
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
+        with engine.begin() as conn:
+            result = conn.execute(text("""
+                UPDATE ws2_machine_config
+                SET machine_id = :machine_id, line = :line, note = :note
+                WHERE sensor_id = :sensor_id
+            """), {
+                "machine_id": machine_id,
+                "line": line,
+                "note": note,
+                "sensor_id": sensor_id
+            })
+            if result.rowcount == 0:
+                return jsonify({"status": "error", "message": "Sensor ID not found"}), 404
 
-        cursor.execute("UPDATE ws2_machine_config SET machine_id = ?, line = ?, note = ? WHERE sensor_id = ?",
-                       (machine_id, line, note, sensor_id))
-        if cursor.rowcount == 0:
-            return jsonify({"status": "error", "message": "Sensor ID not found"}), 404
-
-        conn.commit()
-        conn.close()
         return jsonify({"status": "ok", "message": "Machine updated"}), 200
 
     except Exception as e:
         print("Update error:", e)
         return jsonify({"status": "error", "message": "Bad Request!"}), 400
-    
+
 @app.route('/machine_config/<sensor_id>', methods=["DELETE"])
 def delete_machine_config(sensor_id):
     try:
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
+        with engine.begin() as conn:
+            result = conn.execute(text("DELETE FROM ws2_machine_config WHERE sensor_id = :sensor_id"), {"sensor_id": sensor_id})
+            if result.rowcount == 0:
+                return jsonify({"status": "error", "message": "Sensor ID not found"}), 404
 
-        cursor.execute("DELETE FROM ws2_machine_config WHERE sensor_id = ?", (sensor_id,))
-        if cursor.rowcount == 0:
-            return jsonify({"status": "error", "message": "Sensor ID not found"}), 404
-
-        conn.commit()
-        conn.close()
         return jsonify({"status": "ok", "message": "Machine deleted"}), 200
 
     except Exception as e:
@@ -289,7 +293,6 @@ def check_disconnected():
                     state["status"] = 'disconnected'
                     state["update_time"] = now_str
                     save_to_db(
-                        table_name,
                         sensor_id,
                         state['machine_id'],
                         state['line'],
