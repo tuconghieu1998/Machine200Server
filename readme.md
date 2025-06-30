@@ -32,3 +32,19 @@ Action: Choose "Start a Program" → Browse → Select start_flask.bat.
 
 Click Finish.
 
+
+Docker:
+-- Setup:
+Install WSL, Docker Desktop
+
+Open Powershell as Admin
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+
+Restart PC
+
+Create Dockerfile, docker-compose.yaml, .dockerignore
+-- Build & Run: 
+docker-compose up --build
+-- Build:
+docker build -t machine200server:latest . 
