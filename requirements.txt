@@ -1,0 +1,6 @@
+Flask
+dotenv
+datetime
+sqlalchemy
+waitress
+pyodbc

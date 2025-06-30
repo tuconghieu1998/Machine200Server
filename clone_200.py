@@ -25,12 +25,9 @@ def run_scheduler():
     with ThreadPoolExecutor(max_workers=100) as executor:
         while True:
             start = time.time()
-            futures = [executor.submit(send_data, i + 1) for i in range(NUM_MACHINES)]
-            for future in futures:
-                print(future.result())
-            elapsed = time.time() - start
-            sleep_time = max(0, INTERVAL - elapsed)
-            time.sleep(sleep_time)
+            for i in range(NUM_MACHINES):
+                executor.submit(send_data, i + 1)
+                time.sleep(0.037)
 
 if __name__ == "__main__":
     run_scheduler()
