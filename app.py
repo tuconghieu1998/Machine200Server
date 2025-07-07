@@ -57,6 +57,7 @@ def syncMachineConfig():
         db_sensor_ids = set()
         for row in rows:
             sensor_id = row.sensor_id
+            db_sensor_ids.add(sensor_id)
             if sensor_id in machine_states:
                 # Cập nhật các trường tĩnh nếu có thay đổi
                 machine_states[sensor_id]["machine_id"] = row.machine_id
@@ -114,7 +115,7 @@ def loadMachineConfig():
         return {}
 
 machine_states = loadMachineConfig()
-print(machine_states)
+print(f"LOAD CONFIG total: {len(machine_states)}")
 # Make it accessible to machine_status
 
 @app.route('/')
