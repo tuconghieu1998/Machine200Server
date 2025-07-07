@@ -15,6 +15,7 @@ app.config['DATABASE'] = os.getenv('DATABASE')
 app.config['DB_USERNAME'] = os.getenv('DB_USERNAME')
 app.config['DB_PASSWORD'] = os.getenv('DB_PASSWORD')
 
+# update SQL 
 # SQLAlchemy connection string
 conn_str = (
     f"mssql+pyodbc://{app.config['DB_USERNAME']}:{app.config['DB_PASSWORD']}"
@@ -39,7 +40,7 @@ def save_to_db(sensor_id, machine_id, line, status, timestamp):
             })
         return True
     except Exception as e:
-        print("Lỗi kết nối SQL Server:", e)
+        print("SQL Server Error:", e)
         return False
 
 def getCurrentTime():
